@@ -62,6 +62,7 @@ def get_rfm9x():
 
 def loop(rfm9x, influxdb):
     """May need to run with PYTHONUNBUFFERED=1 if you aren't seeing . and !"""
+
     while True:
         print(".", end="")
         raw_packet = rfm9x.receive()
@@ -75,8 +76,14 @@ def loop(rfm9x, influxdb):
             print(raw_packet)
             continue
 
-        influxdb.write_points(parsed_packet.for_influxdb())
+        store_packet(influxdb, parsed_packet)
         print("!", end="")
+
+def store_packet(influxdb, packet):
+    try:
+        influxdb.write_points(packet.for_influxdb())
+    except Exception as e:
+        print(f"Exception {e}")
 
 
 def main():
