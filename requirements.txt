@@ -1,4 +1,12 @@
+# lora module (RFM9X)
 RPI.GPIO
 adafruit-blinka
 adafruit-circuitpython-rfm9x
+
+# storing datas
 influxdb
+
+# ePaper
+numpy
+spidev
+Pillow
