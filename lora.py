@@ -20,26 +20,36 @@ from PIL import Image,ImageDraw,ImageFont
 
 import threading, queue
 
+import crc8
+
 
 epaper_queue = queue.Queue()
 influxdb_queue = queue.Queue()
 
 class Packet:
     def __init__(self, raw_packet):
-        parsed_packet = struct.unpack("fifII", raw_packet) # https://docs.python.org/3.7/library/struct.html#format-strings
+        self.raw_packet = raw_packet
+        parsed_packet = struct.unpack("ddfIIBxxx", raw_packet) # https://docs.python.org/3.7/library/struct.html#format-strings
         (
             self.temperature,
             self.pressure,
             self.battery_voltage,
             self.packet_number,
             self.flight_number,
+            self.crc,
         ) = parsed_packet
+
+    def validate(self):
+        checksum = crc8.crc8()
+        checksum.update(self.raw_packet[0:28])
+        checksum = int.from_bytes(checksum.digest(), byteorder='big') 
+        return checksum == self.crc
 
     @property
     def altitude(self):
         """Altitude calculation from I forget where"""
 
-        sealevel_pressure = 101325
+        sealevel_pressure = 102800 
         return (
             ((sealevel_pressure / self.pressure) ** (1 / 5.257) - 1)
             * (self.temperature + 273.15)
@@ -56,6 +66,7 @@ class Packet:
                 "battery_voltage": self.battery_voltage,
                 "altitude": self.altitude,
                 "temperature": self.temperature,
+                "valid": self.validate(),
             },
         }]
 
@@ -77,10 +88,10 @@ def loop(rfm9x):
         raw_packet = rfm9x.receive()
         if raw_packet is None:
             continue
-        print(raw_packet)
 
         try:
             parsed_packet = Packet(raw_packet)
+            parsed_packet.validate()
         except struct.error:
             print("Invalid packet")
             print(raw_packet)
@@ -94,28 +105,84 @@ def loop(rfm9x):
 class EPaper():
     def __init__(self, queue):
         self.queue = queue
+
         self.epd = epd2in9.EPD()
         self.epd.init(self.epd.lut_full_update)
         self.epd.Clear(0xFF)
-        self.font24 = ImageFont.truetype('FiraCode-Regular.ttf', 24)
+        self.smol_font = ImageFont.truetype('DejaVuSansMono.ttf', 10)
+        self.medium_font = ImageFont.truetype('DejaVuSansMono.ttf', 16)
+        self.large_font = ImageFont.truetype('DejaVuSansMono.ttf', 34)
+
+        self.pressures = np.array([])
 
     def loop(self):
         while True:
             packet = self.queue.get()
-            self.draw(packet)
+            self.pressures = np.append(self.pressures, packet.pressure)
+            if len(self.pressures) % 20 == 0:
+                self.draw(packet)
 
     def draw(self, packet):
-            Himage = Image.new('1', (self.epd.height, self.epd.width), 255)  # 255: clear the frame
-            draw = ImageDraw.Draw(Himage)
-            temp = "{:.2f} C".format(packet.temperature)
-            draw.text((10, 0), temp, font = self.font24, fill = 0)
+            section_height = self.epd.height // 3
+            section_width = self.epd.width
 
-            pressure = "{:.2f} kPa".format(packet.pressure / 1000.0)
-            draw.text((10, 25), pressure, font = self.font24, fill = 0)
+            screen = Image.new('1', (self.epd.width, self.epd.height), WHITE)  # 255: clear the frame
+            draw = ImageDraw.Draw(screen)
 
-            self.epd.display(self.epd.getbuffer(Himage.rotate(180)))
+            draw.text((10, 2), "altitude:", font = self.smol_font, fill = BLACK)
 
-    # epd2in9.epdconfig.module_exit()
+            height = "{:.1f}M".format(packet.altitude)
+            draw.text((0, 20), height, font = self.large_font, fill = BLACK)
+
+            max_pressure = self.pressures.max() / 1000.0
+            average_pressure  = np.average(self.pressures) / 1000.0
+            max_height = "max:{:.1f}M/avg:{:.1f}M".format(max_pressure, average_pressure)
+            draw.text((0, self.epd.height / 3 - 14), max_height, font = self.smol_font, fill = BLACK)
+
+            line_height = 16
+            temp = ("temp", "{:.1f} C".format(packet.temperature))
+            pressure = ("pres", "{:.1f} kPa".format(packet.pressure / 1000.0))
+            battery_voltage = ("batt", "{:.1f} V".format(packet.battery_voltage))
+            flight_number = ("flit", str(packet.flight_number))
+            packet_number = ("pckt", str(packet.packet_number))
+            for line, (label, value) in enumerate([temp, pressure, battery_voltage, flight_number, packet_number]):
+                draw.text((4, (section_height) + 10 + (line * line_height)), label, font = self.smol_font, fill = BLACK)
+                draw.text((36, (section_height) + 8 + (line * line_height)), value, font = self.medium_font, fill = BLACK)
+
+
+            draw.line((0, section_height, self.epd.width, section_height))
+            draw.line((0, 2 * section_height, self.epd.width, 2 * section_height))
+
+            graph = plot_to_image(self.pressures, section_width, section_height)
+
+            screen.paste(graph, (0, 2 * section_height + 2))
+
+            self.epd.display(self.epd.getbuffer(screen.rotate(180)))
+
+def plot_to_image(data, width, height, dpi = 100):
+    plt.figure(figsize=[width / dpi, height / dpi], dpi=dpi)
+
+    fig = plt.gcf()
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    fig.add_axes(ax)
+
+    plt.plot(data, linewidth = 1)
+
+    fig.canvas.draw()
+
+    image =  Image.frombytes('RGB', fig.canvas.get_width_height(),fig.canvas.tostring_rgb())
+
+    plt.close()
+
+    return image
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+WHITE = 255
+BLACK = 0
 
 class InfluxDB():
     def __init__(self, queue):
@@ -145,7 +212,8 @@ def fake_packet():
     return Packet(bytearray(b'b\xdd\xbeAL\x86\x01\x00\x00\x00\x00\x00r\x02\x00\x00*\x00\x00\x00'))
 
 if __name__ == "__main__":
-    epaper_thread = EPaper(epaper_queue)
-    epaper_thread.draw(fake_packet())
+    # epaper_thread = EPaper(epaper_queue)
+    # epaper_thread.draw(fake_packet())
+    # epd2in9.epdconfig.module_exit()
 
-    # main()
+    main()

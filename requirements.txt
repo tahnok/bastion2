@@ -3,6 +3,9 @@ RPI.GPIO
 adafruit-blinka
 adafruit-circuitpython-rfm9x
 
+#parsing
+crc8
+
 # storing datas
 influxdb
 
@@ -10,3 +13,4 @@ influxdb
 numpy
 spidev
 Pillow
+matplotlib
