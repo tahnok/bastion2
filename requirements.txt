@@ -3,6 +3,9 @@ RPI.GPIO
 adafruit-blinka
 adafruit-circuitpython-rfm9x
 
+#bme
+adafruit-circuitpython-bme280
+
 #parsing
 crc8
 

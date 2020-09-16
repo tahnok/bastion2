@@ -1,0 +1,13 @@
+[Unit]
+Description=Indoor environmental logging
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=pi
+ExecStart=/home/pi/bastion2/virtualenv/bin/python3 /home/pi/bastion2/indoor.py
+
+[Install]
+WantedBy=multi-user.target
