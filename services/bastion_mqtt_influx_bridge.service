@@ -1,0 +1,13 @@
+[Unit]
+Description=MQTT to InfluxDB bridge
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=pi
+ExecStart=/home/pi/bastion2/virtualenv/bin/python3 /home/pi/bastion2/mqtt_influx_bridge.py
+
+[Install]
+WantedBy=multi-user.target

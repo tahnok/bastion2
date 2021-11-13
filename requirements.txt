@@ -10,6 +10,7 @@ adafruit-circuitpython-bme280
 crc8
 
 # storing datas
+paho-mqtt
 influxdb
 
 # ePaper

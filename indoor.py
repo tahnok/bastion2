@@ -1,33 +1,32 @@
 import logging
+import json
 import time
  
 import board
 import busio
 import adafruit_bme280
 
-from influxdb import InfluxDBClient
+
+import paho.mqtt.publish as publish
+
 
 def main():
-    client = InfluxDBClient(host="192.168.1.20", database="hummingbird")
-
     # Create library object using our Bus I2C port
     i2c = busio.I2C(board.SCL, board.SDA)
     bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
      
      
     while True:
-        x = [{
-            "measurement": "inside",
-            "fields": {
+        data = {
                 "pressure": bme280.pressure,
                 "temperature": bme280.temperature,
-                "hummingbird": bme280.humidity
-                },
-            }]
+                "humidity": bme280.humidity
+                }
 
+        payload = json.dumps(data)
 
         try:
-            client.write_points(x)
+            publish.single("indoor", payload, hostname="localhost")
         except Exception as e:
                 print(f"Exception {e}")
         print("\nTemperature: %0.1f C" % bme280.temperature)
